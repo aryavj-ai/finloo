@@ -14,6 +14,7 @@ A beautiful, privacy-focused Progressive Web App for managing your personal fina
 - 🔒 **Privacy First** - All data stays on your device, never sent to servers
 - ⚡ **Fast & Responsive** - Smooth animations and instant interactions
 - 🌐 **Works Offline** - Access your data even without internet
+- test test test
 
 ## 📲 Installation
 
