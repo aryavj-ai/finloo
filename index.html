@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1c1917">
+  <meta name="description" content="Personal Finance Manager - Track your income and expenses">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Finance">
+  
+  <title>Finance Tracker</title>
+  
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json">
+  
+  <!-- Standard favicon -->
+  <link rel="icon" type="image/png" sizes="192x192" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💰</text></svg>">
+  
+  <!-- iOS-specific icons -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='40' fill='%231c1917'/><text x='90' y='130' font-size='100' text-anchor='middle' fill='%23fafaf9'>💰</text></svg>">
+  <link rel="apple-touch-icon" sizes="120x120" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'><rect width='120' height='120' rx='26' fill='%231c1917'/><text x='60' y='86' font-size='66' text-anchor='middle' fill='%23fafaf9'>💰</text></svg>">
+  <link rel="apple-touch-icon" sizes="152x152" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 152 152'><rect width='152' height='152' rx='33' fill='%231c1917'/><text x='76' y='110' font-size='84' text-anchor='middle' fill='%23fafaf9'>💰</text></svg>">
+  <link rel="apple-touch-icon" sizes="180x180" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='40' fill='%231c1917'/><text x='90' y='130' font-size='100' text-anchor='middle' fill='%23fafaf9'>💰</text></svg>">
+  
+  <!-- iOS splash screens -->
+  <link rel="apple-touch-startup-image" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 750 1334'><rect width='750' height='1334' fill='%23fafaf9'/><text x='375' y='667' font-size='120' text-anchor='middle' fill='%231c1917'>💰</text></svg>">
+  
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: pan-y;
+      /* iOS-specific */
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: none;
+    }
+    
+    * {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    
+    input, textarea, select {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    
+    /* iOS safe area support */
+    @supports (padding: env(safe-area-inset-top)) {
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: calc(env(safe-area-inset-bottom) + 20px);
+      }
+    }
+    
+    @media (display-mode: standalone) {
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const { PlusCircle, TrendingUp, TrendingDown, DollarSign, Calendar, Tag, X, Trash2, Edit2, Check, Menu, Download } = lucide;
+
+    function FinanceTracker() {
+      const [transactions, setTransactions] = useState([]);
+      const [categories, setCategories] = useState([]);
+      const [showAddModal, setShowAddModal] = useState(false);
+      const [editingId, setEditingId] = useState(null);
+      const [filter, setFilter] = useState('all');
+      const [loading, setLoading] = useState(true);
+      const [installPrompt, setInstallPrompt] = useState(null);
+      
+      const [formData, setFormData] = useState({
+        type: 'expense',
+        amount: '',
+        category: '',
+        description: '',
+        date: new Date().toISOString().split('T')[0]
+      });
+
+      // PWA Install prompt
+      useEffect(() => {
+        const handler = (e) => {
+          e.preventDefault();
+          setInstallPrompt(e);
+        };
+        window.addEventListener('beforeinstallprompt', handler);
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+      }, []);
+
+      const handleInstall = async () => {
+        if (!installPrompt) return;
+        installPrompt.prompt();
+        const { outcome } = await installPrompt.userChoice;
+        if (outcome === 'accepted') {
+          setInstallPrompt(null);
+        }
+      };
+
+      // Storage implementation
+      const storage = {
+        get: (key) => {
+          try {
+            const item = localStorage.getItem(key);
+            return item ? { value: item } : null;
+          } catch (e) {
+            return null;
+          }
+        },
+        set: (key, value) => {
+          try {
+            localStorage.setItem(key, value);
+            return { value };
+          } catch (e) {
+            return null;
+          }
+        }
+      };
+
+      // Load data on mount
+      useEffect(() => {
+        loadData();
+      }, []);
+
+      const loadData = () => {
+        try {
+          const txResult = storage.get('finance-transactions');
+          const catResult = storage.get('finance-categories');
+          
+          if (txResult?.value) {
+            setTransactions(JSON.parse(txResult.value));
+          }
+          if (catResult?.value) {
+            setCategories(JSON.parse(catResult.value));
+          } else {
+            const defaultCats = ['Food', 'Transport', 'Entertainment', 'Bills', 'Salary', 'Investment', 'Other'];
+            setCategories(defaultCats);
+            storage.set('finance-categories', JSON.stringify(defaultCats));
+          }
+        } catch (error) {
+          console.log('No existing data found, starting fresh');
+          const defaultCats = ['Food', 'Transport', 'Entertainment', 'Bills', 'Salary', 'Investment', 'Other'];
+          setCategories(defaultCats);
+          storage.set('finance-categories', JSON.stringify(defaultCats));
+        }
+        setLoading(false);
+      };
+
+      const saveTransactions = (newTransactions) => {
+        try {
+          storage.set('finance-transactions', JSON.stringify(newTransactions));
+          setTransactions(newTransactions);
+        } catch (error) {
+          console.error('Failed to save:', error);
+        }
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        
+        const newTransaction = {
+          id: editingId || Date.now().toString(),
+          ...formData,
+          amount: parseFloat(formData.amount),
+          createdAt: editingId ? transactions.find(t => t.id === editingId)?.createdAt : new Date().toISOString()
+        };
+
+        let updatedTransactions;
+        if (editingId) {
+          updatedTransactions = transactions.map(t => t.id === editingId ? newTransaction : t);
+          setEditingId(null);
+        } else {
+          updatedTransactions = [newTransaction, ...transactions];
+        }
+        
+        saveTransactions(updatedTransactions);
+        
+        setFormData({
+          type: 'expense',
+          amount: '',
+          category: '',
+          description: '',
+          date: new Date().toISOString().split('T')[0]
+        });
+        setShowAddModal(false);
+      };
+
+      const deleteTransaction = (id) => {
+        const updatedTransactions = transactions.filter(t => t.id !== id);
+        saveTransactions(updatedTransactions);
+      };
+
+      const editTransaction = (transaction) => {
+        setFormData({
+          type: transaction.type,
+          amount: transaction.amount.toString(),
+          category: transaction.category,
+          description: transaction.description,
+          date: transaction.date
+        });
+        setEditingId(transaction.id);
+        setShowAddModal(true);
+      };
+
+      // Calculate stats
+      const filteredTransactions = filter === 'all' 
+        ? transactions 
+        : transactions.filter(t => t.type === filter);
+
+      const totalIncome = transactions
+        .filter(t => t.type === 'income')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      const totalExpenses = transactions
+        .filter(t => t.type === 'expense')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      const balance = totalIncome - totalExpenses;
+
+      const categoryBreakdown = transactions
+        .filter(t => t.type === 'expense')
+        .reduce((acc, t) => {
+          acc[t.category] = (acc[t.category] || 0) + t.amount;
+          return acc;
+        }, {});
+
+      if (loading) {
+        return (
+          <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+            <div className="text-stone-600 text-lg">Loading your finances...</div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-stone-50 relative overflow-hidden">
+          {/* Install Banner */}
+          {installPrompt && (
+            <div className="fixed top-0 left-0 right-0 bg-stone-900 text-white p-4 z-50 flex items-center justify-between shadow-lg">
+              <div className="flex-1">
+                <p className="text-sm font-medium">Install Finance Tracker</p>
+                <p className="text-xs text-stone-300">Add to your home screen for quick access</p>
+              </div>
+              <button
+                onClick={handleInstall}
+                className="px-4 py-2 bg-emerald-600 rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+              >
+                Install
+              </button>
+            </div>
+          )}
+
+          {/* Decorative background elements */}
+          <div className="absolute top-0 right-0 w-96 h-96 bg-amber-100 rounded-full blur-3xl opacity-30 -translate-y-1/2 translate-x-1/2"></div>
+          <div className="absolute bottom-0 left-0 w-96 h-96 bg-emerald-100 rounded-full blur-3xl opacity-30 translate-y-1/2 -translate-x-1/2"></div>
+          
+          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-12">
+            {/* Header */}
+            <header className="mb-8 sm:mb-16">
+              <div className="flex items-end justify-between mb-6 sm:mb-8">
+                <div>
+                  <h1 className="text-5xl sm:text-7xl font-light tracking-tight text-stone-900 mb-1 sm:mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>
+                    Financial
+                  </h1>
+                  <h1 className="text-5xl sm:text-7xl font-light tracking-tight text-stone-900" style={{ fontFamily: "'Playfair Display', serif" }}>
+                    Overview
+                  </h1>
+                </div>
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-stone-900 text-stone-50 rounded-full hover:bg-stone-800 transition-all duration-300 shadow-lg active:scale-95"
+                >
+                  <PlusCircle size={20} />
+                  <span className="font-medium hidden sm:inline">New Entry</span>
+                  <span className="font-medium sm:hidden">Add</span>
+                </button>
+              </div>
+
+              {/* Stats Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+                <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-6 sm:p-8 border border-stone-200 shadow-sm active:shadow-md transition-shadow duration-300">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-emerald-100 flex items-center justify-center">
+                      <TrendingUp className="text-emerald-700" size={20} />
+                    </div>
+                    <span className="text-stone-600 text-xs sm:text-sm uppercase tracking-wider" style={{ fontFamily: "'Courier New', monospace" }}>Income</span>
+                  </div>
+                  <div className="text-3xl sm:text-4xl font-light text-stone-900" style={{ fontFamily: "'Playfair Display', serif" }}>
+                    ${totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+
+                <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-6 sm:p-8 border border-stone-200 shadow-sm active:shadow-md transition-shadow duration-300">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-rose-100 flex items-center justify-center">
+                      <TrendingDown className="text-rose-700" size={20} />
+                    </div>
+                    <span className="text-stone-600 text-xs sm:text-sm uppercase tracking-wider" style={{ fontFamily: "'Courier New', monospace" }}>Expenses</span>
+                  </div>
+                  <div className="text-3xl sm:text-4xl font-light text-stone-900" style={{ fontFamily: "'Playfair Display', serif" }}>
+                    ${totalExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+
+                <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-6 sm:p-8 border border-stone-200 shadow-sm active:shadow-md transition-shadow duration-300">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-amber-100 flex items-center justify-center">
+                      <DollarSign className="text-amber-700" size={20} />
+                    </div>
+                    <span className="text-stone-600 text-xs sm:text-sm uppercase tracking-wider" style={{ fontFamily: "'Courier New', monospace" }}>Balance</span>
+                  </div>
+                  <div className={`text-3xl sm:text-4xl font-light ${balance >= 0 ? 'text-emerald-700' : 'text-rose-700'}`} style={{ fontFamily: "'Playfair Display', serif" }}>
+                    ${Math.abs(balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+            </header>
+
+            {/* Category Breakdown */}
+            {Object.keys(categoryBreakdown).length > 0 && (
+              <section className="mb-8 sm:mb-12">
+                <h2 className="text-xl sm:text-2xl font-light text-stone-900 mb-4 sm:mb-6" style={{ fontFamily: "'Playfair Display', serif" }}>
+                  Expense Breakdown
+                </h2>
+                <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-6 sm:p-8 border border-stone-200">
+                  <div className="space-y-4">
+                    {Object.entries(categoryBreakdown)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([category, amount]) => {
+                        const percentage = (amount / totalExpenses) * 100;
+                        return (
+                          <div key={category}>
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-sm sm:text-base text-stone-700 font-medium">{category}</span>
+                              <span className="text-sm sm:text-base text-stone-900 font-light" style={{ fontFamily: "'Courier New', monospace" }}>
+                                ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            <div className="w-full bg-stone-200 rounded-full h-2 overflow-hidden">
+                              <div 
+                                className="h-full bg-gradient-to-r from-stone-600 to-stone-800 rounded-full transition-all duration-500"
+                                style={{ width: `${percentage}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* Filter Tabs */}
+            <div className="flex gap-2 sm:gap-3 mb-4 sm:mb-6 overflow-x-auto">
+              {['all', 'income', 'expense'].map(filterType => (
+                <button
+                  key={filterType}
+                  onClick={() => setFilter(filterType)}
+                  className={`px-4 sm:px-6 py-2 rounded-full text-xs sm:text-sm uppercase tracking-wider transition-all duration-300 whitespace-nowrap active:scale-95 ${
+                    filter === filterType
+                      ? 'bg-stone-900 text-stone-50 shadow-md'
+                      : 'bg-white/60 text-stone-600 active:bg-white border border-stone-200'
+                  }`}
+                  style={{ fontFamily: "'Courier New', monospace" }}
+                >
+                  {filterType}
+                </button>
+              ))}
+            </div>
+
+            {/* Transactions List */}
+            <section className="pb-20">
+              <h2 className="text-xl sm:text-2xl font-light text-stone-900 mb-4 sm:mb-6" style={{ fontFamily: "'Playfair Display', serif" }}>
+                Recent Transactions
+              </h2>
+              
+              {filteredTransactions.length === 0 ? (
+                <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-12 sm:p-16 border border-stone-200 text-center">
+                  <p className="text-stone-500 text-base sm:text-lg">No transactions yet. Start by adding your first entry.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredTransactions.map((transaction, index) => (
+                    <div
+                      key={transaction.id}
+                      className="bg-white/60 backdrop-blur-sm rounded-xl p-4 sm:p-6 border border-stone-200 active:shadow-lg transition-all duration-300"
+                      style={{
+                        animationDelay: `${index * 50}ms`,
+                        animation: 'fadeInUp 0.4s ease-out forwards',
+                        opacity: 0
+                      }}
+                    >
+                      <div className="flex items-start sm:items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 sm:gap-6 flex-1 min-w-0">
+                          <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            transaction.type === 'income' ? 'bg-emerald-100' : 'bg-rose-100'
+                          }`}>
+                            {transaction.type === 'income' ? (
+                              <TrendingUp className="text-emerald-700" size={20} />
+                            ) : (
+                              <TrendingDown className="text-rose-700" size={20} />
+                            )}
+                          </div>
+                          
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <h3 className="text-base sm:text-lg font-medium text-stone-900 truncate">
+                                {transaction.description || 'Untitled'}
+                              </h3>
+                              <span className="px-2 sm:px-3 py-1 bg-stone-100 text-stone-700 rounded-full text-xs uppercase tracking-wider flex-shrink-0" style={{ fontFamily: "'Courier New', monospace" }}>
+                                {transaction.category}
+                              </span>
+                            </div>
+                            <p className="text-stone-500 text-xs sm:text-sm" style={{ fontFamily: "'Courier New', monospace" }}>
+                              {new Date(transaction.date).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric',
+                                year: 'numeric'
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-3 sm:gap-6 flex-shrink-0">
+                          <div className={`text-xl sm:text-2xl font-light whitespace-nowrap ${
+                            transaction.type === 'income' ? 'text-emerald-700' : 'text-rose-700'
+                          }`} style={{ fontFamily: "'Playfair Display', serif" }}>
+                            {transaction.type === 'income' ? '+' : '-'}${transaction.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                          
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => editTransaction(transaction)}
+                              className="p-2 rounded-lg active:bg-stone-100 transition-colors duration-200"
+                            >
+                              <Edit2 size={18} className="text-stone-600" />
+                            </button>
+                            <button
+                              onClick={() => deleteTransaction(transaction.id)}
+                              className="p-2 rounded-lg active:bg-rose-100 transition-colors duration-200"
+                            >
+                              <Trash2 size={18} className="text-rose-600" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+
+          {/* Add/Edit Modal */}
+          {showAddModal && (
+            <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-6">
+              <div 
+                className="bg-white rounded-t-3xl sm:rounded-3xl p-6 sm:p-8 w-full sm:max-w-lg sm:w-full shadow-2xl max-h-[90vh] overflow-y-auto"
+                style={{
+                  animation: 'modalAppear 0.3s ease-out'
+                }}
+              >
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-2xl sm:text-3xl font-light text-stone-900" style={{ fontFamily: "'Playfair Display', serif" }}>
+                    {editingId ? 'Edit Transaction' : 'New Transaction'}
+                  </h2>
+                  <button
+                    onClick={() => {
+                      setShowAddModal(false);
+                      setEditingId(null);
+                      setFormData({
+                        type: 'expense',
+                        amount: '',
+                        category: '',
+                        description: '',
+                        date: new Date().toISOString().split('T')[0]
+                      });
+                    }}
+                    className="p-2 rounded-full active:bg-stone-100 transition-colors duration-200"
+                  >
+                    <X size={24} className="text-stone-600" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* Type Toggle */}
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, type: 'expense' })}
+                      className={`flex-1 py-3 rounded-xl transition-all duration-300 active:scale-95 ${
+                        formData.type === 'expense'
+                          ? 'bg-rose-600 text-white shadow-lg'
+                          : 'bg-stone-100 text-stone-600 active:bg-stone-200'
+                      }`}
+                    >
+                      Expense
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, type: 'income' })}
+                      className={`flex-1 py-3 rounded-xl transition-all duration-300 active:scale-95 ${
+                        formData.type === 'income'
+                          ? 'bg-emerald-600 text-white shadow-lg'
+                          : 'bg-stone-100 text-stone-600 active:bg-stone-200'
+                      }`}
+                    >
+                      Income
+                    </button>
+                  </div>
+
+                  {/* Amount */}
+                  <div>
+                    <label className="block text-stone-700 mb-2 uppercase tracking-wider text-sm" style={{ fontFamily: "'Courier New', monospace" }}>
+                      Amount
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={formData.amount}
+                      onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-stone-300 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10 transition-all duration-200 text-base"
+                      placeholder="0.00"
+                    />
+                  </div>
+
+                  {/* Category */}
+                  <div>
+                    <label className="block text-stone-700 mb-2 uppercase tracking-wider text-sm" style={{ fontFamily: "'Courier New', monospace" }}>
+                      Category
+                    </label>
+                    <select
+                      required
+                      value={formData.category}
+                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-stone-300 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10 transition-all duration-200 text-base"
+                    >
+                      <option value="">Select category</option>
+                      {categories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <label className="block text-stone-700 mb-2 uppercase tracking-wider text-sm" style={{ fontFamily: "'Courier New', monospace" }}>
+                      Description
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-stone-300 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10 transition-all duration-200 text-base"
+                      placeholder="e.g., Grocery shopping"
+                    />
+                  </div>
+
+                  {/* Date */}
+                  <div>
+                    <label className="block text-stone-700 mb-2 uppercase tracking-wider text-sm" style={{ fontFamily: "'Courier New', monospace" }}>
+                      Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={formData.date}
+                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-stone-300 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10 transition-all duration-200 text-base"
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <button
+                    type="submit"
+                    className="w-full py-4 bg-stone-900 text-white rounded-xl active:bg-stone-800 transition-all duration-300 shadow-lg active:shadow-xl font-medium active:scale-95"
+                  >
+                    {editingId ? 'Update Transaction' : 'Add Transaction'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@300;400;500;600;700&display=swap');
+            
+            @keyframes fadeInUp {
+              from {
+                opacity: 0;
+                transform: translateY(20px);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+            
+            @keyframes modalAppear {
+              from {
+                opacity: 0;
+                transform: translateY(100%);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+            
+            @media (min-width: 640px) {
+              @keyframes modalAppear {
+                from {
+                  opacity: 0;
+                  transform: scale(0.95);
+                }
+                to {
+                  opacity: 1;
+                  transform: scale(1);
+                }
+              }
+            }
+            
+            input[type="number"]::-webkit-inner-spin-button,
+            input[type="number"]::-webkit-outer-spin-button {
+              -webkit-appearance: none;
+              margin: 0;
+            }
+            
+            input[type="number"] {
+              -moz-appearance: textfield;
+            }
+          `}</style>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<FinanceTracker />, document.getElementById('root'));
+  </script>
+
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    lucide.createIcons();
+  </script>
+
+  <script>
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .then(reg => console.log('Service Worker registered'))
+          .catch(err => console.log('Service Worker registration failed'));
+      });
+    }
+  </script>
+</body>
+</html>
